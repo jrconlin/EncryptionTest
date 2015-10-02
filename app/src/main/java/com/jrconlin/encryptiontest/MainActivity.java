@@ -17,7 +17,7 @@ public class MainActivity extends Activity {
     static String TestString = "Mary had a little lamb with some fresh mint jelly";
     static String RemoteSharedKeyStr = "BG9GNB9gB0mO5SEIKJOOif9W4SpXryJm8rqacp4M3opbkxd8mp4uF_NE89e5FyZwMxFQtGVAbQYSgaquMOO3gk8";
     static String RemoteEncryptionKeyStr = "BFN4-N0q1xkbDsk9Epf94iGkfUUVmdgLVzMfqTIEIikOwW9CM0R98PYEhiZB-fQmVXtIR4uGx7X5Ip8fGg1L7jE";
-    static String RemoteBodyStr = "JQZVoKnUjeAeFkvPsJ1Zdetk6Aff_eq6jIcXMhLh2kCOTaDVEvCayeASSoUm-B1icbLeD_igpgNzMYE4luxStvM3";
+    static String RemoteBodyStr = "kNG6CzfC3VFairpqouC6WUg-CAd4BHb6WN2xTBz0KgT7gYhBbMKGwNDnS0OX3hto7Y2SSp0L9pKIz-dDpdGx5XKN";
     static String RemoteSaltStr = "a4UV9oUyAtX6ztg4CNiLww";
     static String[] headers = {
             "Content-Encoding: aesgcm128",
@@ -42,25 +42,25 @@ public class MainActivity extends Activity {
             return;
         }
 
-        Encrypt encrypt = new Encrypt(RemoteSharedKeyStr);
+        Crypt encrypt = new Crypt(RemoteSharedKeyStr);
         encrypt.salt(RemoteSaltStr);
         try {
             mDisplay.append("encryption ==== \n");
             encrypt.encrypt(TestString.getBytes());
             String dh = Base64.encodeToString(encrypt.body, Base64.URL_SAFE);
-            mDisplay.append((dh == RemoteBodyStr) + "\n");
+            mDisplay.append((RemoteBodyStr.equals(dh)) + "\n");
         } catch(Exception x){
             Log.e(TAG, "Exception", x);
         }
 
-        Decrypt decrypt = new Decrypt(RemoteSharedKeyStr);
+        Crypt decrypt = new Crypt(RemoteSharedKeyStr);
         byte[] body = Base64.decode(RemoteBodyStr,Base64.URL_SAFE);
         try {
             // decrypt.loadKeys(headers);
             mDisplay.append("decryption ==== \n");
             byte[] result = decrypt.setSalt(RemoteSaltStr).setEncryptionKey(RemoteEncryptionKeyStr).decrypt(body);
             mDisplay.append("Source " + TestString + "\n");
-            mDisplay.append("Result " + result.toString() + "\n");
+            mDisplay.append("Result " + Base64.encodeToString(result, Base64.URL_SAFE) + "\n");
         }catch(Exception x) {
             Log.e(TAG, "Exception", x);
         }

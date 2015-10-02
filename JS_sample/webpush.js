@@ -7,8 +7,9 @@
 
   'use strict';
   var g = window;
-  var RemoteShareKeyStr="BG9GNB9gB0mO5SEIKJOOif9W4SpXryJm8rqacp4M3opbkxd8mp4uF_NE89e5FyZwMxFQtGVAbQYSgaquMOO3gk8";
+  var RemoteShareKeyStr="BPgFAug2x3Yh2t2eQHDtFuCatbkxgWwMU96hlov5-7NFCxs-VrVFCX0bKQk9sTeCmfckM3ob6UNXymf0VRUnwd4";
   var staticSalt = "a4UV9oUyAtX6ztg4CNiLww";
+
   var P256DH = {
     name: 'ECDH',
     namedCurve: 'P-256'
@@ -113,8 +114,9 @@
         if (h.byteLength < len) {
           throw new Error('Length is too long');
         }
-        reply = h.slice(0, len);
-        console.debug("hkdf gen", reply);
+        var reply;
+        reply  = h.slice(0, len);
+        // console.debug("hkdf gen", base64url.encode(new Int8Array(reply)));
         return reply;
       });
   };
@@ -143,28 +145,35 @@
             webCrypto.deriveBits({ name: P256DH.name, public: remoteKey },
                                  localKey, 256))
       .then(rawKey => {
-          console.info("salt", salt, "rawkey", rawKey);
-        var kdf = new hkdf(salt, rawKey);
-        return Promise.allMap({
-          key: kdf.generate(ENCRYPT_INFO, 16)
-            .then(gcmBits => {
-                  console.debug("gcmBits", new Int8Array(gcmBits));
-                  return webCrypto.importKey('raw', gcmBits, 'AES-GCM', false, ['encrypt'])
-              }),
-          nonce: kdf.generate(NONCE_INFO, 12)
-        })
+          // inject fake key here?
+          console.debug("salt", base64url.encode(salt), "\n",
+                        "sharedKey", base64url.encode(new Int8Array(rawKey)));
+          var kdf = new hkdf(salt, rawKey);
+          return Promise.allMap({
+            key: kdf.generate(ENCRYPT_INFO, 16)
+              .then(gcmBits => {
+                console.debug('gcmB', base64url.encode(new Int8Array(gcmBits)));
+                return webCrypto.importKey('raw', gcmBits, 'AES-GCM', false, ['encrypt'])}),
+            nonce: kdf.generate(NONCE_INFO, 12)
+              .then(n => {
+                console.debug('nonce', base64url.encode(new Int8Array(n)));
+                return n})
+          })
       })
       .then(r => {
-          console.info("r", r);
-        // 4096 is the default size, though we burn 1 for padding
-        return Promise.all(chunkArray(data, 4095).map((slice, index) => {
-          var padded = bsConcat([new Uint8Array([0]), slice]);
-          return webCrypto.encrypt({
-            name: 'AES-GCM',
-            iv: generateNonce(r.nonce, index)
-          }, r.key, padded);
-        }));
-    }).then(bsConcat).catch(x => console.error(x));
+          // 4096 is the default size, though we burn 1 for padding
+          console.debug("r",r);
+          return Promise.all(chunkArray(data, 4095).map((slice, index) => {
+            var padded = bsConcat([new Uint8Array([0]), slice]);
+            var iv = generateNonce(r.nonce, index);
+            console.debug("iv nonce :", base64url.encode(iv));
+            return webCrypto.encrypt({
+              name: 'AES-GCM',
+              iv: iv,
+            }, r.key, padded);
+          }));
+    }).then(bsConcat)
+    .catch(x => console.error(x));
   }
 
   /*
@@ -188,6 +197,7 @@
     }
     return webCrypto.generateKey(P256DH, false, ['deriveBits'])
       .then(localKey => {
+
         return Promise.allMap({
           payload: encrypt(localKey.privateKey, subscription.p256dh, salt, data),
           // 1337 p-256 specific haxx to get the raw value out of the spki value
@@ -201,7 +211,7 @@
             Encryption: 'keyid=p256dh;salt=' + base64url.encode(salt),
             'Content-Encoding': 'aesgcm128'
           },
-          body: results.payload
+          body: base64url.encode(results.payload),
         };
         console.debug("Output", options)
         //return fetch(subscription.endpoint, options);
@@ -215,7 +225,6 @@
     );
     */
   }
-
 
 webpush({p256dh: base64url.decode(RemoteShareKeyStr)},
         "Mary had a little lamb with some fresh mint jelly");
