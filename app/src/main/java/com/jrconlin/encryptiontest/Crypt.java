@@ -12,6 +12,7 @@ import org.spongycastle.math.ec.ECPoint;
 import java.io.ByteArrayOutputStream;
 import java.security.KeyFactory;
 import java.security.Security;
+import java.util.Arrays;
 import java.util.Random;
 
 import javax.crypto.Cipher;
@@ -48,11 +49,11 @@ public class Crypt {
     private byte[] dh;
     int record_size;
     public String keyid = "p256dh";
-    byte[] remote_public_key;
+    byte[] key;
 
 
-    Crypt(String sharedKey){
-        this.remote_public_key = Base64.decode(sharedKey, Base64.URL_SAFE);
+    Crypt(String key){
+        this.key = Base64.decode(key, Base64.URL_SAFE);
     }
 
     /** Generate a random salt
@@ -95,53 +96,88 @@ public class Crypt {
         return nonce;
      }
 
-    private void encode(byte[] localKey, byte[]salt, byte[] data, int pad) throws Exception {
+    // HKDF encodes correctly.
+    static public void hkdf_test(byte[] salt, byte[] ikm) {
+        try {
+            byte[] prk = HKDF.hkdfExtract(salt, ikm);
+            byte[] nonce = HKDF.hkdfExpand(prk, NONCE_INFO, NONCE_INFO_ITR);
+            Log.i("hkdf", "Nonce: " + Base64.encodeToString(nonce, Base64.URL_SAFE));
+        } catch (Exception x) {
+            Log.e("hkdf", "Crap", x);
+        }
+    }
+
+    private byte[] getKASecret(byte[] remote_public_key) throws Exception{
+        PushKeyPair localKey = new PushKeyPair().generateECPair();
+        ECParameterSpec spec = ECNamedCurveTable.getParameterSpec("secp256r1");
+        KeyAgreement keyAgreement = KeyAgreement.getInstance("ECDH", PROVIDER);
+        KeyFactory kf = KeyFactory.getInstance("ECDH", PROVIDER);
+        ECPoint point = spec.getCurve().decodePoint(remote_public_key);
+        ECPublicKeySpec pubSpec = new ECPublicKeySpec(point, spec);
+        ECPublicKey publicKey = (ECPublicKey) kf.generatePublic(pubSpec);
+        keyAgreement.init(localKey.private_key);
+        keyAgreement.doPhase(publicKey, true);
+
+        return keyAgreement.generateSecret();
+    }
+
+    public Crypt encrypt(byte[] data) throws Exception {
+        // Convert the sent bytes to a public Key
+        // No, really, these are the steps.
+        Log.i(TAG, "Converting shared key to dh public key...");
+        byte[] ka_secret = this.getKASecret(this.key);
+        // Loop over the data in 4K chunk
+        Log.i(TAG, "Encoding data...");
         int rs = Math.min(data.length, 4096);
-        byte[] prk = HKDF.hkdfExtract(salt, localKey);
-        Log.i(TAG, "prk    : " + Base64.encodeToString(prk, Base64.URL_SAFE));
-        byte[] nonce_root = HKDF.hkdfExpand(prk, NONCE_INFO, NONCE_INFO_ITR);
-        Log.i(TAG, "nonce  : " + Base64.encodeToString(nonce_root, Base64.URL_SAFE));
-        byte[] gcmBits = HKDF.hkdfExpand(prk, ENCRYPT_INFO, ENCRYPT_INFO_ITR);
-        Log.i(TAG, "gcmbits: "+ Base64.encodeToString(gcmBits, Base64.URL_SAFE));
-        Cipher tc = Cipher.getInstance("AES/GCM/NoPadding", PROVIDER);
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        Log.i(TAG, "Starting encryption...");
+        Cipher tc = Cipher.getInstance("AES/GCM/NoPadding", PROVIDER);
+        byte[] prk = HKDF.hkdfExtract(salt, ka_secret);
+        Log.d(TAG, "prk    : " + Base64.encodeToString(prk, Base64.URL_SAFE));
+        byte[] nonce_root = HKDF.hkdfExpand(prk, NONCE_INFO, NONCE_INFO_ITR);
+        Log.d(TAG, "nonce  : " + Base64.encodeToString(nonce_root, Base64.URL_SAFE));
+        byte[] gcmBits = HKDF.hkdfExpand(prk, ENCRYPT_INFO, ENCRYPT_INFO_ITR);
+        Log.d(TAG, "encrypt gcmbits: " + Base64.encodeToString(gcmBits, Base64.URL_SAFE));
+        Log.i(TAG, "Starting encoding...");
         tc.init(Cipher.ENCRYPT_MODE,
                 new SecretKeySpec(gcmBits, "AES"),
                 new IvParameterSpec(nonce_root));
         // Chunk through data in 4095 blocks
         outputStream.write(tc.doFinal(data));
-        Log.i(TAG, "Encryption written");
+        Log.i(TAG, "encoding written");
         // end chunk
         this.body = outputStream.toByteArray();
+        Log.i(TAG, "Done Encoding.");
+        return this;
     }
 
-    public Crypt encrypt(byte[] data) throws Exception {
-        PushKeyPair localKey = new PushKeyPair().generateECPair();
-        // Convert the sent bytes to a public Key
-        // No, really, these are the steps.
-        Log.i(TAG, "Converting shared key to public key...");
-        ECParameterSpec spec = ECNamedCurveTable.getParameterSpec("secp256r1");
-        KeyAgreement keyAgreement = KeyAgreement.getInstance("ECDH", PROVIDER);
-        KeyFactory kf = KeyFactory.getInstance("ECDH", PROVIDER);
-        ECPoint point = spec.getCurve().decodePoint(this.remote_public_key);
-        ECPublicKeySpec pubSpec = new ECPublicKeySpec(point, spec);
-        ECPublicKey publicKey = (ECPublicKey) kf.generatePublic(pubSpec);
-
-        keyAgreement.init(localKey.private_key);
-        keyAgreement.doPhase(publicKey, true);
-
-        byte[] ka_secret = keyAgreement.generateSecret();
-        // Do the actual encryption
-        int maxBufferLen = 4095;
-        int start = 0;
-
+    public Crypt decrypt(byte[] inbuffer) throws Exception {
+        if (inbuffer.length == 0) {
+            return null;
+        }
+        if (this.record_size > 0) {
+            if (inbuffer.length + 16 != this.record_size) {
+                throw new Exception("Invalid record size");
+            }
+            // TODO trim inbuffer to record_size
+        }
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        byte[]salt = salt();
-        // Loop over the data in 4K chunk
-        Log.i(TAG, "Encoding data...");
-        this.encode(ka_secret, salt, data, 0);
-        Log.i(TAG, "Done Encoding.");
+        Cipher tc = Cipher.getInstance("AES/GCM/NoPadding", PROVIDER);
+        //Nonce is first 16 bytes;
+        byte[]nonce = Arrays.copyOfRange(inbuffer, 0, 16);
+        byte[]newData = Arrays.copyOfRange(inbuffer, 16, inbuffer.length - 16);
+        // Loop over data in 4K chunks
+        Log.i(TAG, "Decoding data...");
+        try {
+            tc.init(Cipher.DECRYPT_MODE,
+                    new SecretKeySpec(this.key, "AES"),
+                    new IvParameterSpec(nonce));
+            outputStream.write(tc.doFinal(newData));
+            this.body = outputStream.toByteArray();
+            Log.d(TAG, Arrays.toString(this.body));
+        } catch (Exception x) {
+            Log.w(TAG, "straight: ", x);
+        }
+        Log.i(TAG, "Done Decoding.");
         return this;
     }
 
@@ -177,13 +213,13 @@ public class Crypt {
                             this.setSalt(keyval[1]);
                         case "dh":
                             this.setEncryptionKey(keyval[1]);
-                            if (this.remote_public_key != null) {
+                            if (this.key != null) {
                                 Log.w(TAG, "Both key and dh defined");
                             }
                         case "rs":
                             this.record_size = Integer.parseInt(keyval[1]);
                         case "key":
-                            this.remote_public_key = Base64.decode(keyval[1], Base64.URL_SAFE);
+                            this.key = Base64.decode(keyval[1], Base64.URL_SAFE);
                             if (this.dh != null) {
                                 Log.w(TAG, "Both key and dh defined");
                             }
@@ -194,24 +230,4 @@ public class Crypt {
         return this;
     }
 
-    public byte[] decrypt(byte[] inbuffer) throws Exception {
-        if (inbuffer.length == 0) {
-            return null;
-        }
-        if (this.record_size > 0) {
-            if (inbuffer.length + 16 != this.record_size) {
-                throw new Exception("Invalid record size");
-            }
-            // TODO trim inbuffer to record_size
-        }
-        PushKeyPair localKey = new PushKeyPair().generateECPair();
-        byte[] prk = HKDF.hkdfExtract(salt, this.remote_public_key);
-//        byte[] nonce = HKDF.hkdfExpand(prk, NONCE_INFO, NONCE_INFO_ITR);
-        byte[] okm = HKDF.hkdfExpand(prk, ENCRYPT_INFO, ENCRYPT_INFO_ITR);
-
-        Cipher tc = Cipher.getInstance("AES/GCM/NoPadding", "BC");
-        SecretKeySpec sk = new SecretKeySpec(okm, "AES");
-        tc.init(Cipher.DECRYPT_MODE, sk, new IvParameterSpec(new byte[12]));
-        return tc.doFinal(inbuffer);
-    }
 }

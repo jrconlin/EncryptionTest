@@ -8,6 +8,8 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.widget.TextView;
 
+import java.util.Arrays;
+
 public class MainActivity extends Activity {
 
     static TextView mDisplay;
@@ -15,13 +17,14 @@ public class MainActivity extends Activity {
 
     // The following were taken from a js test client
     static String TestString = "Mary had a little lamb with some fresh mint jelly";
+    static String PrivateKeyStr = "MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQggtEvRfut4H5P31vTRhKl71X3d70eNjA4bV1_CX_iyV2gCgYIKoZIzj0DAQehRANCAAQpqLq_Ugmv8dxbFHxNa6v97GnUNSQ-CdhVhOhTI7R73kszJSeUS7zaGXsH-MR1yQ9mNsObsygkcox_QJqm8hHC";
+    static String PublicKeyStr = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKai6v1IJr_HcWxR8TWur_exp1DUkPgnYVYToUyO0e95LMyUnlEu82hl7B_jEdckPZjbDm7MoJHKMf0CapvIRwg==";
     static String RemoteSharedKeyStr = "BG9GNB9gB0mO5SEIKJOOif9W4SpXryJm8rqacp4M3opbkxd8mp4uF_NE89e5FyZwMxFQtGVAbQYSgaquMOO3gk8";
     static String RemoteEncryptionKeyStr = "BFN4-N0q1xkbDsk9Epf94iGkfUUVmdgLVzMfqTIEIikOwW9CM0R98PYEhiZB-fQmVXtIR4uGx7X5Ip8fGg1L7jE";
-    static String RemoteBodyStr = "kNG6CzfC3VFairpqouC6WUg-CAd4BHb6WN2xTBz0KgT7gYhBbMKGwNDnS0OX3hto7Y2SSp0L9pKIz-dDpdGx5XKN";
-    static String RemoteSaltStr = "a4UV9oUyAtX6ztg4CNiLww";
+    static String StaticSaltStr = "a4UV9oUyAtX6ztg4CNiLww";
     static String[] headers = {
             "Content-Encoding: aesgcm128",
-            "Encryption: keyid=p256dh;salt=" + RemoteSaltStr,
+            "Encryption: keyid=p256dh;salt=" + StaticSaltStr,
             "Encryption-Key: keyid=p256dh;dh=" + RemoteSharedKeyStr};
 
     @Override
@@ -32,18 +35,18 @@ public class MainActivity extends Activity {
         // Generate the keys
 
         PushKeyPair pk;
-
+//*
         try {
             pk = new PushKeyPair().generateECPair();
-            Log.i(TAG, "Public Key: Private " + pk.private_key);
-            Log.i(TAG, "Public Key: Public  " + pk.public_key);
+            Log.i(TAG, "Private Key: " + Base64.encodeToString(pk.private_key.getEncoded(), Base64.URL_SAFE));
+            Log.i(TAG, "Public Key:  " + Base64.encodeToString(pk.public_key.getEncoded(), Base64.URL_SAFE));
         } catch (Exception x) {
             Log.e(TAG, "onCreate ", x);
             return;
         }
-
+/*
         Crypt encrypt = new Crypt(RemoteSharedKeyStr);
-        encrypt.salt(RemoteSaltStr);
+        encrypt.salt(StaticSaltStr);
         try {
             mDisplay.append("encryption ==== \n");
             encrypt.encrypt(TestString.getBytes());
@@ -52,15 +55,19 @@ public class MainActivity extends Activity {
         } catch(Exception x){
             Log.e(TAG, "Exception", x);
         }
+//*/
+        //Crypt.hkdf_test(Base64.decode(StaticSaltStr, Base64.URL_SAFE), Base64.decode(RemoteSharedKeyStr, Base64.URL_SAFE));
+        // For current values, this should produce "bka0O47Qe5jTRsqZ"
 
-        Crypt decrypt = new Crypt(RemoteSharedKeyStr);
-        byte[] body = Base64.decode(RemoteBodyStr,Base64.URL_SAFE);
+        Crypt decrypt = new Crypt(PrivateKeyStr);
+        String dh = "BOoIAgjWRInfplagK7cB6qTlXKFK1ER7ObwZkD2Lq_NGmZWglqNtbY8Pdyn6BM6zMMUSYqKhXQSDp11lvGWz-bE";
+        byte[] body = Base64.decode("s-P19iGxf4qRnNq7jcci9hRZFjEb_EEn2TjmR9LhaJwcyP3XW3sDKbvp0oiZGpAK0rTy9_W3O3qas8WL7RxpNbob", Base64.URL_SAFE);
         try {
             // decrypt.loadKeys(headers);
             mDisplay.append("decryption ==== \n");
-            byte[] result = decrypt.setSalt(RemoteSaltStr).setEncryptionKey(RemoteEncryptionKeyStr).decrypt(body);
+            byte[] result = decrypt.setSalt(StaticSaltStr).setEncryptionKey(dh).decrypt(body).body;
             mDisplay.append("Source " + TestString + "\n");
-            mDisplay.append("Result " + Base64.encodeToString(result, Base64.URL_SAFE) + "\n");
+            mDisplay.append("Result " + Arrays.toString(result) + "\n");
         }catch(Exception x) {
             Log.e(TAG, "Exception", x);
         }

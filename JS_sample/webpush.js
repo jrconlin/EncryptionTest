@@ -7,7 +7,7 @@
 
   'use strict';
   var g = window;
-  var RemoteShareKeyStr="BPgFAug2x3Yh2t2eQHDtFuCatbkxgWwMU96hlov5-7NFCxs-VrVFCX0bKQk9sTeCmfckM3ob6UNXymf0VRUnwd4";
+  var RemoteShareKeyStr="MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKai6v1IJr_HcWxR8TWur_exp1DUkPgnYVYToUyO0e95LMyUnlEu82hl7B_jEdckPZjbDm7MoJHKMf0CapvIRwg==";
   var staticSalt = "a4UV9oUyAtX6ztg4CNiLww";
 
   var P256DH = {
@@ -221,10 +221,12 @@
           throw new Error('Unable to deliver message');
         }
       }
-
     );
     */
   }
+
+var hkdf_test = new hkdf(base64url.decode(staticSalt), base64url.decode(RemoteShareKeyStr));
+hkdf_test.generate(NONCE_INFO, 12).then(result => console.debug("hkdf_test", base64url.encode(result)));
 
 webpush({p256dh: base64url.decode(RemoteShareKeyStr)},
         "Mary had a little lamb with some fresh mint jelly");
